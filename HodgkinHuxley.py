@@ -6,12 +6,37 @@ class HodgkinHuxley:
     El=-50.
     EK=-75.
     ENa=55.
-    gK=24.31
-    gNa=70.7
+    gl=0.3
+    gK=36.
+    gNa=120.
+    
+    alphan_zero = 0.0581977
+    betan_zero = 0.125
+    nzero = 0.317677
+     
+    alpham_zero = 0.223564
+    betam_zero = 4
+    mzero = 0.0529325
+    
+    alphah_zero = 0.07
+    betah_zero = 0.0474259
+    hzero = 0.596121
+    
     
     def __init__(self):
         pass
-      
+    
+    @staticmethod
+    def run(time_steps, Vm):
+        current_vm = [Vm]
+        for t in range(time_steps):
+            ninf = HodgkinHuxley.ninf(current_vm[-1])
+            taun = HodgkinHuxley.taun(current_vm[-1])
+            minf = HodgkinHuxley.minf(current_vm[-1])
+            taum = HodgkinHuxley.taum(current_vm[-1])
+            hinf = HodgkinHuxley.hinf(current_vm[-1])
+            tauh = HodgkinHuxley.tauh(current_vm[-1])
+            
     @staticmethod  
     def alphan(vm_inf):
         return 0.01 * (HodgkinHuxley.El - vm_inf + 10) / (np.exp( 0.1 * (HodgkinHuxley.El - vm_inf + 10 ) ) -1 )
@@ -61,7 +86,7 @@ class HodgkinHuxley:
         return 1/(HodgkinHuxley.alphah(vm_inf)+HodgkinHuxley.betah(vm_inf))
     
     @staticmethod
-    def n(vzero : float, vm_inf : float, t):
+    def n(vzero, vm_inf : float, t):
         return HodgkinHuxley.ninf(vm_inf) - (HodgkinHuxley.ninf(vm_inf) - HodgkinHuxley.ninf(vzero)) * np.exp(-t / HodgkinHuxley.taun(vm_inf) )
     
     @staticmethod
@@ -160,7 +185,7 @@ class HodgkinHuxley:
         legend = ax.legend(loc='center right', frameon=False)
         plt.title(r"Steady-state voltage dependence of the $m^3h$ gating variable")
         plt.xlabel(r"$V_m \;\; (mV)$")
-        plt.ylabel(r"ms^{-1}")
+        plt.ylabel(r"$ms^{-1}$")
         plt.savefig('m3h_varying_vinfty.pdf')
         
     @staticmethod
@@ -196,7 +221,7 @@ class HodgkinHuxley:
         legend = ax.legend(loc='center right', frameon=False)
         plt.title(r"Time dependence of $I_{K}$ as $V_m$ varies")
         plt.xlabel("t (ms)")
-        plt.ylabel(r"$I_{K}$ \;\; ($\mu A/cm^2$)")
+        plt.ylabel(r"$I_{Na} \;\; (\mu A/cm^2)$")
         plt.savefig('IKt_varying_vinfty.pdf')
         
     @staticmethod
@@ -208,22 +233,23 @@ class HodgkinHuxley:
         legend = ax.legend(loc='lower right', frameon=False)
         plt.title(r"Time dependence of $I_{Na}$ as $V_m$ varies")
         plt.xlabel("t (ms)")
-        plt.ylabel(r"$I_{Na}$ \;\; ($\mu A/cm^2$)")
+        plt.ylabel(r"$I_{Na} \;\; (\mu A/cm^2)$")
         plt.savefig('INat_varying_vinfty.pdf')
         
     @staticmethod
     def plot_K_gating_t():
-        v_zero = (HodgkinHuxley.El, 0.)
-        v_set = (0., HodgkinHuxley.El)
-        time = ( np.arange(0., 10., 0.01), np.arange(10., 20., 0.01) )
+        run_time = np.linspace(0., 25., 100)
+        real_time = np.linspace(0., 50., 200)
         
-        n = np.concatenate([HodgkinHuxley.n(v0, v2, t - 0.995*t[0]) for v0, v2, t in zip (v_zero, v_set, time) ])
-        t = np.concatenate(time)
+        n = np.concatenate((
+            HodgkinHuxley.n(HodgkinHuxley.El, 0, run_time),
+            HodgkinHuxley.n(0, HodgkinHuxley.El, run_time)
+        ))
         
         fig, ax = plt.subplots()
         
-        ax.plot(t, n, 'g', label=r'$n$')
-        ax.plot(t, np.power(n, 4), 'b', label=r'$n^4$')
+        ax.plot(real_time, n, 'g', label=r'$n$')
+        ax.plot(real_time, np.power(n, 4), 'b', label=r'$n^4$')
         legend = ax.legend(loc='upper right', frameon=False)
         plt.title(r"Time dependence of $K$ gating variable as $V_m$ goes from -50 to 0 mV")
         plt.xlabel("t (ms)")
@@ -232,23 +258,27 @@ class HodgkinHuxley:
         
     @staticmethod
     def plot_Na_gating_t():
-        v_zero = (HodgkinHuxley.El, 0)
-        v_set = (0, HodgkinHuxley.El)
-        time = ( np.arange(0., 10., 0.1), np.arange(10., 20., 0.1) )
+        run_time = np.linspace(0., 25., 100)
+        real_time = np.linspace(0., 50., 200)
         
-        m = np.concatenate([ HodgkinHuxley.m(v0, v2, t - 0.995*t[0]) for v0, v2, t in zip (v_zero, v_set, time) ])
-        h = np.concatenate([ HodgkinHuxley.h(v0, v2, t-  0.995*t[0]) for v0, v2, t in zip (v_zero, v_set, time) ])
-        t = np.concatenate(time)
+        m = np.concatenate((
+            HodgkinHuxley.m(HodgkinHuxley.El, 0, run_time),
+            HodgkinHuxley.m(0, HodgkinHuxley.El, run_time)
+        ))
+        h = np.concatenate((
+            HodgkinHuxley.h(HodgkinHuxley.El, 0, run_time),
+            HodgkinHuxley.h(0, HodgkinHuxley.El, run_time)
+        ))
         
         fig, ax = plt.subplots()
         
-        ax.plot(t, m, 'g', label=r'$m$')
-        ax.plot(t, h, 'b', label=r'$h$')
-        ax.plot(t, np.multiply(h, np.power(m, 3)), 'r', label=r'$m^3h$')
+        ax.plot(real_time, m, 'g', label=r'$m$')
+        ax.plot(real_time, h, 'b', label=r'$h$')
+        ax.plot(real_time, np.multiply(h, np.power(m, 3)), 'r', label=r'$m^3h$')
         legend = ax.legend(loc='upper right', frameon=False)
         plt.title(r"Time dependence of $Na$ gating variables as $V_m$ goes from -50 to 0 mV")
         plt.xlabel("t (ms)")
-        plt.ylabel(r"$ms^{-1})$")
+        plt.ylabel(r"$ms^{-1}$")
         plt.savefig('Na_gating_varying_t.pdf')
         
     @staticmethod
