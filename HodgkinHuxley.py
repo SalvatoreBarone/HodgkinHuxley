@@ -1,137 +1,190 @@
 #!python3
 import numpy as np, matplotlib.pyplot as plt
+from abc import ABC
 
+class Gate(ABC):
+    """The Gate object is the base class that manages a channel's common kinetics and open state"""
+    
+    def __init__(self, Vrest : float):
+        super().__init__()
+        self.alpha = 0
+        self.beta = 0
+        self.Vrest = Vrest
+        self.state = 0
+        self.updateRateVariables(self.Vrest)
+        self.setInfiniteState()
+        self.setInfiniteTau()
 
-class HodgkinHuxley:
-    El=-50.
-    EK=-75.
-    ENa=55.
-    gl=0.3
-    gK=36.
-    gNa=120.
-    
-    alphan_zero = 0.0581977
-    betan_zero = 0.125
-    nzero = 0.317677
-     
-    alpham_zero = 0.223564
-    betam_zero = 4
-    mzero = 0.0529325
-    
-    alphah_zero = 0.07
-    betah_zero = 0.0474259
-    hzero = 0.596121
-    
-    
-    def __init__(self):
+    def update(self, deltaTms):
+        alphaState = self.alpha * (1-self.state)
+        betaState = self.beta * self.state
+        self.state += deltaTms * (alphaState - betaState)
+
+    def setInfiniteState(self):
+        self.state = self.alpha / (self.alpha + self.beta)
+        
+    def setInfiniteTau(self):
+        self.tau = 1 / (self.alpha + self.beta)
+        
+    def updateRateVariables(self, Vm : float):
         pass
     
-    @staticmethod
-    def run(time_steps, Vm):
-        current_vm = [Vm]
-        for t in range(time_steps):
-            ninf = HodgkinHuxley.ninf(current_vm[-1])
-            taun = HodgkinHuxley.taun(current_vm[-1])
-            minf = HodgkinHuxley.minf(current_vm[-1])
-            taum = HodgkinHuxley.taum(current_vm[-1])
-            hinf = HodgkinHuxley.hinf(current_vm[-1])
-            tauh = HodgkinHuxley.tauh(current_vm[-1])
-            
+class NGate(Gate):
     @staticmethod  
-    def alphan(vm_inf):
-        return 0.01 * (HodgkinHuxley.El - vm_inf + 10) / (np.exp( 0.1 * (HodgkinHuxley.El - vm_inf + 10 ) ) -1 )
+    def get_alpha(Vrest, Vm):
+        return 0.01 * (Vrest - Vm + 10) / (np.exp( 0.1 * (Vrest - Vm + 10 ) ) -1 )
     
     @staticmethod
-    def betan(vm_inf):
-        return 0.125* np.exp(0.0125 * (HodgkinHuxley.El - vm_inf))
-    
-    @staticmethod
-    def ninf(vm_inf):
-        return HodgkinHuxley.alphan(vm_inf) / ( HodgkinHuxley.alphan(vm_inf) + HodgkinHuxley.betan(vm_inf))
-    
-    @staticmethod
-    def taun(vm_inf):
-        return 1 / (HodgkinHuxley.alphan(vm_inf) + HodgkinHuxley.betan(vm_inf))
+    def get_beta(Vrest, Vm):
+        return 0.125* np.exp(0.0125 * (Vrest - Vm))
 
+    def __init__(self, Vrest : float):
+        super().__init__(Vrest)
+        
+    def updateRateVariables(self, Vm):
+        self.alpha = NGate.get_alpha(self.Vrest, Vm)
+        self.beta = NGate.get_beta(self.Vrest, Vm)
+        
+class MGate(Gate):
     @staticmethod
-    def alpham(vm_inf): 
-        return 0.1*(HodgkinHuxley.El-vm_inf+25)/(np.exp(0.1*(HodgkinHuxley.El-vm_inf+25))-1)
+    def get_alpha(Vrest : float, Vm: float): 
+        return 0.1*(Vrest-Vm+25)/(np.exp(0.1*(Vrest-Vm+25))-1)
     
     @staticmethod
-    def betam(vm_inf): 
-        return 4*np.exp((HodgkinHuxley.El-vm_inf)/18)
+    def get_beta(Vrest : float, Vm: float): 
+        return 4*np.exp((Vrest-Vm)/18)
+    
+    def __init__(self, Vrest : float, Vm : float):
+        super().__init__(Vrest)
+        
+    def updateRateVariables(self, Vm):
+        self.alpha = MGate.get_alpha(self.Vrest, Vm)
+        self.beta = MGate.get_beta(self.Vrest, Vm)
+    
+class HGate(Gate):   
+    @staticmethod
+    def get_alpha(Vrest : float, Vm: float): 
+        return 0.07*np.exp((Vrest-Vm)/20)
     
     @staticmethod
-    def alphah(vm_inf): 
-        return 0.07*np.exp((HodgkinHuxley.El-vm_inf)/20)
+    def get_beta(Vrest : float, Vm: float): 
+        return 1/(1+np.exp((Vrest-Vm+30)/10))
+    
+    def __init__(self, Vrest : float, Vm: float):
+        super().__init__(Vrest)
+        
+    def updateRateVariables(self, Vm):
+        self.alpha = HGate.get_alpha(self.Vrest, Vm)
+        self.beta = HGate.get_beta(self.Vrest, Vm)
+    
+class HodgkinHuxley:
+    EL=-50.
+    EK=-75.
+    ENa=55.
+    gL=0.3
+    gK=36.
+    gNa=120.
+    C=1.
+    
+    def __init__(self):
+        self.n = NGate(self.EL)
+        self.m = NGate(self.EL)
+        self.h = NGate(self.EL)
+        self.Vm = [self.EL]
+        
+    def iterate(self, Iin, deltaTms):
+        self.n.updateRateVariables(self.Vm[-1])
+        self.m.updateRateVariables(self.Vm[-1])
+        self.h.updateRateVariables(self.Vm[-1])
+        
+        """calculate channel currents using the latest gate time constants"""
+        self.INa = self.gNa * (self.Vm[-1] - self.ENa) * np.power(self.m.state, 3) * self.h.state 
+        self.IK  = self.gK  * (self.Vm[-1] - self.EK)  * np.power(self.n.state, 4)                
+        self.IL  = self.gL  * (self.Vm[-1] - self.EL)
+        Im = Iin - self.INa - self.IK - self.IL
+        self.Vm += deltaTms * Im / self.C
+        
+        """calculate new channel open states using latest Vm"""
+        self.n.update(deltaTms)
+        self.m.update(deltaTms)
+        self.h.update(deltaTms)
     
     @staticmethod
-    def betah(vm_inf): 
-        return 1/(1+np.exp((HodgkinHuxley.El-vm_inf+30)/10))
+    def ninf(Vm):
+        return NGate.get_alpha(HodgkinHuxley.EL, Vm) / ( NGate.get_alpha(HodgkinHuxley.EL, Vm) + NGate.get_beta(HodgkinHuxley.EL, Vm))
     
     @staticmethod
-    def minf(vm_inf): 
-        return HodgkinHuxley.alpham(vm_inf)/(HodgkinHuxley.alpham(vm_inf)+HodgkinHuxley.betam(vm_inf))
+    def taun(Vm):
+        return 1 / (NGate.get_alpha(HodgkinHuxley.EL, Vm) + NGate.get_beta(HodgkinHuxley.EL, Vm))
     
     @staticmethod
-    def taum(vm_inf): 
-        return 1/(HodgkinHuxley.alpham(vm_inf)+HodgkinHuxley.betam(vm_inf))
+    def n(V0, Vm : float, t):
+        return HodgkinHuxley.ninf(Vm) - (HodgkinHuxley.ninf(Vm) - HodgkinHuxley.ninf(V0)) * np.exp(-t / HodgkinHuxley.taun(Vm) )
     
     @staticmethod
-    def hinf(vm_inf): 
-        return HodgkinHuxley.alphah(vm_inf)/(HodgkinHuxley.alphah(vm_inf)+HodgkinHuxley.betah(vm_inf))
+    def minf(Vm): 
+        return MGate.get_alpha(HodgkinHuxley.EL, Vm)/(MGate.get_alpha(HodgkinHuxley.EL, Vm)+MGate.get_beta(HodgkinHuxley.EL, Vm))
     
     @staticmethod
-    def tauh(vm_inf): 
-        return 1/(HodgkinHuxley.alphah(vm_inf)+HodgkinHuxley.betah(vm_inf))
+    def taum(Vm): 
+        return 1/(MGate.get_alpha(HodgkinHuxley.EL, Vm)+MGate.get_beta(HodgkinHuxley.EL, Vm))
     
     @staticmethod
-    def n(vzero, vm_inf : float, t):
-        return HodgkinHuxley.ninf(vm_inf) - (HodgkinHuxley.ninf(vm_inf) - HodgkinHuxley.ninf(vzero)) * np.exp(-t / HodgkinHuxley.taun(vm_inf) )
+    def m(V0, Vm, t):
+        return HodgkinHuxley.minf(Vm) - (HodgkinHuxley.minf(Vm) - HodgkinHuxley.minf(V0)) * np.exp(-t / HodgkinHuxley.taum(Vm))
     
     @staticmethod
-    def m(vzero, vm_inf, t):
-        return HodgkinHuxley.minf(vm_inf) - (HodgkinHuxley.minf(vm_inf) - HodgkinHuxley.minf(vzero)) * np.exp(-t / HodgkinHuxley.taum(vm_inf))
+    def hinf(Vm): 
+        return HGate.get_alpha(HodgkinHuxley.EL, Vm)/(HGate.get_alpha(HodgkinHuxley.EL, Vm)+HGate.get_beta(HodgkinHuxley.EL, Vm))
     
     @staticmethod
-    def h(vzero, vm_inf, t):
-        return HodgkinHuxley.hinf(vm_inf) - ( HodgkinHuxley.hinf(vm_inf) - HodgkinHuxley.hinf(vzero)) * np.exp(-t / HodgkinHuxley.tauh(vm_inf))
+    def tauh(Vm): 
+        return 1/(HGate.get_alpha(HodgkinHuxley.EL, Vm)+HGate.get_beta(HodgkinHuxley.EL, Vm))
+    
     
     @staticmethod
-    def GK(vzero, vm_inf, t):
-        return np.multiply(np.power(HodgkinHuxley.n(vzero, vm_inf, t), 4), HodgkinHuxley.gK)
+    def h(V0, Vm, t):
+        return HodgkinHuxley.hinf(Vm) - ( HodgkinHuxley.hinf(Vm) - HodgkinHuxley.hinf(V0)) * np.exp(-t / HodgkinHuxley.tauh(Vm))
     
     @staticmethod
-    def IK(vzero, vm_inf, t):
-        return HodgkinHuxley.GK(vzero, vm_inf, t)*(vm_inf - HodgkinHuxley.EK)
+    def IL(Vm):
+        return HodgkinHuxley.gL * (Vm - HodgkinHuxley.EL)
     
     @staticmethod
-    def GNa(vzero,vm_inf,t): 
-        return HodgkinHuxley.gNa*HodgkinHuxley.h(vzero,vm_inf,t) * HodgkinHuxley.m(vzero,vm_inf,t)**3
+    def GK(V0, Vm, t):
+        return np.multiply(np.power(HodgkinHuxley.n(V0, Vm, t), 4), HodgkinHuxley.gK)
     
     @staticmethod
-    def INa(vzero,vm_inf,t): 
-        return HodgkinHuxley.GNa(vzero,vm_inf,t)*(vm_inf-HodgkinHuxley.ENa)
+    def IK(V0, Vm, t):
+        return HodgkinHuxley.GK(V0, Vm, t)*(Vm - HodgkinHuxley.EK)
     
     @staticmethod
-    def Gm(vzero,vm_inf,t): 
-        return HodgkinHuxley.GK(vzero,vm_inf,t)+HodgkinHuxley.GNa(vzero,vm_inf,t)
+    def GNa(V0,Vm,t): 
+        return HodgkinHuxley.gNa*HodgkinHuxley.h(V0,Vm,t) * HodgkinHuxley.m(V0,Vm,t)**3
     
     @staticmethod
-    def Im(vzero,vm_inf,t): 
-        return HodgkinHuxley.IK(vzero,vm_inf,t)+HodgkinHuxley.INa(vzero,vm_inf,t)
+    def INa(V0,Vm,t): 
+        return HodgkinHuxley.GNa(V0,Vm,t)*(Vm-HodgkinHuxley.ENa)
+    
+    @staticmethod
+    def Gm(V0,Vm,t): 
+        return HodgkinHuxley.GK(V0,Vm,t)+HodgkinHuxley.GNa(V0,Vm,t)
+    
+    @staticmethod
+    def Im(V0,Vm,t): 
+        return HodgkinHuxley.IK(V0, Vm, t) + HodgkinHuxley.INa(V0,Vm,t) + HodgkinHuxley.IL(Vm)
     
     @staticmethod
     def plot_ninfty_vm():
-        vm_inf = np.arange(-100., 100., 0.01)
-        alpha = HodgkinHuxley.alphan(vm_inf)
-        beta = HodgkinHuxley.betan(vm_inf)
-        n = HodgkinHuxley.ninf(vm_inf)
+        Vm = np.arange(-100., 100., 0.01)
+        alpha = NGate.get_alpha(HodgkinHuxley.EL, Vm)
+        beta = NGate.get_beta(HodgkinHuxley.EL, Vm)
+        n = HodgkinHuxley.ninf(Vm)
         
         fig, ax = plt.subplots()
-        ax.plot(vm_inf, alpha, 'g', label=r'$\alpha_n$')
-        ax.plot(vm_inf, beta, 'b', label=r'$\beta_n$')
-        ax.plot(vm_inf, n, 'r', label=r'$n_\infty$')
+        ax.plot(Vm, alpha, 'g', label=r'$\alpha_n$')
+        ax.plot(Vm, beta, 'b', label=r'$\beta_n$')
+        ax.plot(Vm, n, 'r', label=r'$n_\infty$')
         legend = ax.legend(loc='upper left', frameon=False)
         plt.title("Steady-state voltage dependence of the n gating variable")
         plt.xlabel(r"$V_m \;\; (mV)$")
@@ -140,15 +193,15 @@ class HodgkinHuxley:
         
     @staticmethod
     def plot_minfty_vm():
-        vm_inf = np.arange(-100., 100., 0.01)
-        alpha = HodgkinHuxley.alpham(vm_inf)
-        beta = HodgkinHuxley.betam(vm_inf)
-        m = HodgkinHuxley.minf(vm_inf)
+        Vm = np.arange(-100., 100., 0.01)
+        alpha = MGate.get_alpha(HodgkinHuxley.EL, Vm)
+        beta = MGate.get_beta(HodgkinHuxley.EL, Vm)
+        m = HodgkinHuxley.minf(Vm)
         
         fig, ax = plt.subplots()
-        ax.plot(vm_inf, alpha, 'g', label=r'$\alpha_m$')
-        ax.plot(vm_inf, beta, 'b', label=r'$\beta_m$')
-        ax.plot(vm_inf, m, 'r', label=r'$m_\infty$')
+        ax.plot(Vm, alpha, 'g', label=r'$\alpha_m$')
+        ax.plot(Vm, beta, 'b', label=r'$\beta_m$')
+        ax.plot(Vm, m, 'r', label=r'$m_\infty$')
         legend = ax.legend(loc='upper right', frameon=False)
         plt.title("Steady-state voltage dependence of the m gating variable")
         plt.xlabel(r"$V_m \;\; (mV)$")
@@ -157,15 +210,15 @@ class HodgkinHuxley:
         
     @staticmethod
     def plot_hinfty_vm():
-        vm_inf = np.arange(-100., 100., 0.01)
-        alpha = HodgkinHuxley.alphah(vm_inf)
-        beta = HodgkinHuxley.betah(vm_inf)
-        h = HodgkinHuxley.hinf(vm_inf)
+        Vm = np.arange(-100., 100., 0.01)
+        alpha = HGate.get_alpha(HodgkinHuxley.EL, Vm)
+        beta = HGate.get_beta(HodgkinHuxley.EL, Vm)
+        h = HodgkinHuxley.hinf(Vm)
         
         fig, ax = plt.subplots()
-        ax.plot(vm_inf, alpha, 'g', label=r'$\alpha_h$')
-        ax.plot(vm_inf, beta, 'b', label=r'$\beta_h$')
-        ax.plot(vm_inf, h, 'r', label=r'$h_\infty$')
+        ax.plot(Vm, alpha, 'g', label=r'$\alpha_h$')
+        ax.plot(Vm, beta, 'b', label=r'$\beta_h$')
+        ax.plot(Vm, h, 'r', label=r'$h_\infty$')
         legend = ax.legend(loc='center right', frameon=False)
         plt.title("Steady-state voltage dependence of the h gating variable")
         plt.xlabel(r"$V_m \;\; (mV)$")
@@ -174,14 +227,14 @@ class HodgkinHuxley:
         
     @staticmethod
     def plot_m3h_vm():
-        vm_inf = np.arange(-100., 100., 0.01)
-        m = HodgkinHuxley.minf(vm_inf)
-        h = HodgkinHuxley.hinf(vm_inf)
+        Vm = np.arange(-100., 100., 0.01)
+        m = HodgkinHuxley.minf(Vm)
+        h = HodgkinHuxley.hinf(Vm)
         
         fig, ax = plt.subplots()
-        ax.plot(vm_inf, m, 'g', label=r'$m_\infty$')
-        ax.plot(vm_inf, h, 'b', label=r'$h_\infty$')
-        ax.plot(vm_inf, np.multiply(h, np.power(m,3)), 'r', label=r'$m_\infty ^3 h_\infty$')
+        ax.plot(Vm, m, 'g', label=r'$m_\infty$')
+        ax.plot(Vm, h, 'b', label=r'$h_\infty$')
+        ax.plot(Vm, np.multiply(h, np.power(m,3)), 'r', label=r'$m_\infty ^3 h_\infty$')
         legend = ax.legend(loc='center right', frameon=False)
         plt.title(r"Steady-state voltage dependence of the $m^3h$ gating variable")
         plt.xlabel(r"$V_m \;\; (mV)$")
@@ -242,8 +295,8 @@ class HodgkinHuxley:
         real_time = np.linspace(0., 50., 200)
         
         n = np.concatenate((
-            HodgkinHuxley.n(HodgkinHuxley.El, 0, run_time),
-            HodgkinHuxley.n(0, HodgkinHuxley.El, run_time)
+            HodgkinHuxley.n(HodgkinHuxley.EL, 0, run_time),
+            HodgkinHuxley.n(0, HodgkinHuxley.EL, run_time)
         ))
         
         fig, ax = plt.subplots()
@@ -262,12 +315,12 @@ class HodgkinHuxley:
         real_time = np.linspace(0., 50., 200)
         
         m = np.concatenate((
-            HodgkinHuxley.m(HodgkinHuxley.El, 0, run_time),
-            HodgkinHuxley.m(0, HodgkinHuxley.El, run_time)
+            HodgkinHuxley.m(HodgkinHuxley.EL, 0, run_time),
+            HodgkinHuxley.m(0, HodgkinHuxley.EL, run_time)
         ))
         h = np.concatenate((
-            HodgkinHuxley.h(HodgkinHuxley.El, 0, run_time),
-            HodgkinHuxley.h(0, HodgkinHuxley.El, run_time)
+            HodgkinHuxley.h(HodgkinHuxley.EL, 0, run_time),
+            HodgkinHuxley.h(0, HodgkinHuxley.EL, run_time)
         ))
         
         fig, ax = plt.subplots()
@@ -287,17 +340,17 @@ class HodgkinHuxley:
         real_time = np.linspace(0., 50., 200)
         
         GK = np.concatenate((
-            HodgkinHuxley.GK(HodgkinHuxley.El, 0, run_time),
-            HodgkinHuxley.GK(0, HodgkinHuxley.El, run_time)
+            HodgkinHuxley.GK(HodgkinHuxley.EL, 0, run_time),
+            HodgkinHuxley.GK(0, HodgkinHuxley.EL, run_time)
         ))
         GNa = np.concatenate((
-            HodgkinHuxley.GNa(HodgkinHuxley.El, 0, run_time),
-            HodgkinHuxley.GNa(0, HodgkinHuxley.El, run_time)
+            HodgkinHuxley.GNa(HodgkinHuxley.EL, 0, run_time),
+            HodgkinHuxley.GNa(0, HodgkinHuxley.EL, run_time)
         ))
         
         G = np.concatenate((
-            HodgkinHuxley.Gm(HodgkinHuxley.El, 0, run_time),
-            HodgkinHuxley.Gm(0, HodgkinHuxley.El, run_time)
+            HodgkinHuxley.Gm(HodgkinHuxley.EL, 0, run_time),
+            HodgkinHuxley.Gm(0, HodgkinHuxley.EL, run_time)
         ))
         
         
@@ -317,17 +370,17 @@ class HodgkinHuxley:
         real_time = np.linspace(0., 50., 200)
         
         IK = np.concatenate((
-            HodgkinHuxley.IK(HodgkinHuxley.El, 0, run_time),
-            HodgkinHuxley.IK(0, HodgkinHuxley.El, run_time)
+            HodgkinHuxley.IK(HodgkinHuxley.EL, 0, run_time),
+            HodgkinHuxley.IK(0, HodgkinHuxley.EL, run_time)
         ))
         INa = np.concatenate((
-            HodgkinHuxley.INa(HodgkinHuxley.El, 0, run_time),
-            HodgkinHuxley.INa(0, HodgkinHuxley.El, run_time)
+            HodgkinHuxley.INa(HodgkinHuxley.EL, 0, run_time),
+            HodgkinHuxley.INa(0, HodgkinHuxley.EL, run_time)
         ))
         
         I = np.concatenate((
-            HodgkinHuxley.Im(HodgkinHuxley.El, 0, run_time),
-            HodgkinHuxley.Im(0, HodgkinHuxley.El, run_time)
+            HodgkinHuxley.Im(HodgkinHuxley.EL, 0, run_time),
+            HodgkinHuxley.Im(0, HodgkinHuxley.EL, run_time)
         ))
         
         fig, ax = plt.subplots()
